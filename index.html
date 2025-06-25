@@ -217,8 +217,8 @@
         const SUPPORT_EMAIL = 'ifamarconi@balanz.com';
         const DEFAULT_RESPONSE = `No entiendo tu pregunta. Prueba con temas operativos como aperturas, reasignaciones o transferencias, o contacta a ${SUPPORT_EMAIL}.`;
         const APP_VERSION = '1.2';
-        const GITHUB_TOKEN = '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'; // Replace with your PAT
-        const REPO_OWNER = 'nicoblancop'; // Replace with your GitHub username
+        const GITHUB_TOKEN = 'YOUR_GITHUB_TOKEN'; // Replace with your PAT
+        const REPO_OWNER = 'YOUR_GITHUB_USERNAME'; // Replace with your GitHub username
         const REPO_NAME = 'balanz-ifa-chatbot'; // Replace with your repository name
         const DATABASE_PATH = 'database.json';
 
@@ -289,6 +289,12 @@
 
         // Fetch database from GitHub
         async function fetchDatabase() {
+            const chatContainer = document.getElementById('chatContainer');
+            const loadingMessage = document.createElement('div');
+            loadingMessage.classList.add('message', 'bot', 'loading');
+            loadingMessage.textContent = 'Cargando base de datos...';
+            chatContainer.appendChild(loadingMessage);
+
             try {
                 const response = await fetch(`https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/${DATABASE_PATH}?t=${new Date().getTime()}`);
                 if (response.ok) {
@@ -302,7 +308,7 @@
                     localStorage.setItem('queryFrequency', JSON.stringify(queryFrequency));
                     localStorage.setItem('queryClusters', JSON.stringify(queryClusters));
                 } else {
-                    throw new Error('Failed to fetch database');
+                    throw new Error(`HTTP ${response.status}: Failed to fetch database`);
                 }
             } catch (error) {
                 console.error('Error fetching database:', error);
@@ -310,41 +316,94 @@
                 queryLogs = JSON.parse(localStorage.getItem('queryLogs')) || [];
                 queryFrequency = JSON.parse(localStorage.getItem('queryFrequency')) || {};
                 queryClusters = JSON.parse(localStorage.getItem('queryClusters')) || {};
+                const errorMessage = document.createElement('div');
+                errorMessage.classList.add('message', 'bot', 'loading');
+                errorMessage.textContent = 'Error cargando base de datos. Usando datos locales.';
+                chatContainer.appendChild(errorMessage);
+                setTimeout(() => errorMessage.remove(), 3000);
             }
+            loadingMessage.remove();
+            chatContainer.scrollTop = chatContainer.scrollHeight;
         }
 
-        // Update database on GitHub
+        // Update database on GitHub with retry logic
         async function updateDatabase() {
-            if (!isAdmin) return; // Only admins can update
+            if (!isAdmin) return;
             const database = { knowledgeBase, queryLogs, queryFrequency, queryClusters };
-            try {
-                // Get current file SHA
-                const getFileResponse = await fetch(`https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${DATABASE_PATH}`, {
-                    headers: { Authorization: `token ${GITHUB_TOKEN}` }
-                });
-                const fileData = await getFileResponse.json();
-                const sha = fileData.sha;
+            const maxRetries = 3;
+            let attempt = 0;
 
-                // Update file
-                const updateResponse = await fetch(`https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${DATABASE_PATH}`, {
-                    method: 'PUT',
-                    headers: {
-                        Authorization: `token ${GITHUB_TOKEN}`,
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        message: `Update database.json ${new Date().toISOString()}`,
-                        content: btoa(unescape(encodeURIComponent(JSON.stringify(database, null, 2)))),
-                        sha: sha
-                    })
-                });
+            while (attempt < maxRetries) {
+                try {
+                    // Get current file SHA
+                    let sha = null;
+                    try {
+                        const getFileResponse = await fetch(`https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${DATABASE_PATH}`, {
+                            headers: {
+                                Authorization: `token ${GITHUB_TOKEN}`,
+                                'Accept': 'application/vnd.github.v3+json'
+                            }
+                        });
+                        if (getFileResponse.status === 404) {
+                            // File doesn't exist, create it
+                            const createResponse = await fetch(`https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${DATABASE_PATH}`, {
+                                method: 'PUT',
+                                headers: {
+                                    Authorization: `token ${GITHUB_TOKEN}`,
+                                    'Content-Type': 'application/json',
+                                    'Accept': 'application/vnd.github.v3+json'
+                                },
+                                body: JSON.stringify({
+                                    message: `Create database.json ${new Date().toISOString()}`,
+                                    content: btoa(unescape(encodeURIComponent(JSON.stringify(database, null, 2))))
+                                })
+                            });
+                            if (!createResponse.ok) {
+                                throw new Error(`HTTP ${createResponse.status}: Failed to create database`);
+                            }
+                            return;
+                        }
+                        const fileData = await getFileResponse.json();
+                        if (!getFileResponse.ok) {
+                            throw new Error(`HTTP ${getFileResponse.status}: Failed to fetch SHA`);
+                        }
+                        sha = fileData.sha;
+                    } catch (shaError) {
+                        console.error('Error fetching SHA:', shaError);
+                        throw shaError;
+                    }
 
-                if (!updateResponse.ok) {
-                    throw new Error('Failed to update database');
+                    // Update file
+                    const updateResponse = await fetch(`https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${DATABASE_PATH}`, {
+                        method: 'PUT',
+                        headers: {
+                            Authorization: `token ${GITHUB_TOKEN}`,
+                            'Content-Type': 'application/json',
+                            'Accept': 'application/vnd.github.v3+json'
+                        },
+                        body: JSON.stringify({
+                            message: `Update database.json ${new Date().toISOString()}`,
+                            content: btoa(unescape(encodeURIComponent(JSON.stringify(database, null, 2)))),
+                            sha: sha
+                        })
+                    });
+
+                    if (updateResponse.ok) {
+                        return;
+                    } else {
+                        const errorData = await updateResponse.json();
+                        throw new Error(`HTTP ${updateResponse.status}: ${errorData.message}`);
+                    }
+                } catch (error) {
+                    attempt++;
+                    console.error(`Attempt ${attempt} failed:`, error);
+                    if (attempt === maxRetries) {
+                        console.error('Max retries reached. Saving locally.');
+                        alert('Error al actualizar la base de datos en GitHub. Los cambios se guardaron localmente. Detalle: ' + error.message);
+                        return;
+                    }
+                    await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
                 }
-            } catch (error) {
-                console.error('Error updating database:', error);
-                alert('Error al actualizar la base de datos en GitHub. Los cambios se guardaron localmente.');
             }
         }
 
@@ -505,7 +564,7 @@
                     const debugLog = document.getElementById('debugLog');
                     const debugItem = document.createElement('div');
                     debugItem.classList.add('debug-item');
-                    debugItem.textContent = `<p><strong>Query:</strong> ${query}</p><p><strong>AI Match:</strong> ${keys[maxIndex]} (Score: ${similarities[maxIndex].toFixed(3)})</p>`;
+                    debugItem.innerHTML = `<p><strong>Query:</strong> ${query}</p><p><strong>AI Match:</strong> ${keys[maxIndex]} (Score: ${similarities[maxIndex].toFixed(3)})</p>`;
                     debugLog.appendChild(debugItem);
                     debugLog.scrollTop = debugLog.scrollHeight;
                 }
