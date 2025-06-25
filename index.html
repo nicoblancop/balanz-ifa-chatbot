@@ -1,0 +1,445 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Balanz IFA Intelligent Chatbot</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f4f4f6;
+        }
+        h1, h2 {
+            text-align: center;
+            color: #2c3e50;
+        }
+        .chat-container, .kb-container {
+            border: 2px solid #3498db;
+            border-radius: 10px;
+            padding: 15px;
+            background-color: white;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        .chat-container {
+            height: 400px;
+            overflow-y: auto;
+        }
+        .message {
+            margin: 8px 0;
+            padding: 10px;
+            border-radius: 8px;
+            max-width: 80%;
+        }
+        .user {
+            background-color: #3498db;
+            color: white;
+            margin-left: auto;
+            text-align: right;
+        }
+        .bot {
+            background-color: #ecf0f1;
+            color: #2c3e50;
+            margin-right: auto;
+        }
+        .input-container, .kb-form {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        input[type="text"], textarea {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 16px;
+        }
+        textarea {
+            min-height: 80px;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #3498db;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #2980b9;
+        }
+        .export-btn {
+            display: block;
+            margin: 10px auto;
+            padding: 8px 16px;
+            background-color: #2ecc71;
+        }
+        .export-btn:hover {
+            background-color: #27ae60;
+        }
+        .kb-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        .kb-table th, .kb-table td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        .kb-table th {
+            background-color: #3498db;
+            color: white;
+        }
+        .delete-btn {
+            background-color: #e74c3c;
+        }
+        .delete-btn:hover {
+            background-color: #c0392b;
+        }
+        .suggestions {
+            margin-top: 20px;
+        }
+        .suggestion-item {
+            background-color: #f9f9f9;
+            padding: 10px;
+            margin-bottom: 5px;
+            border-radius: 5px;
+        }
+        .hidden {
+            display: none;
+        }
+        @media (max-width: 600px) {
+            .input-container, .kb-form {
+                flex-direction: column;
+            }
+            input[type="text"], textarea, button {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <h1>Chatbot - Equipo Marconi</h1>
+    <div class="chat-container" id="chatContainer">
+        <div class="message bot">¡Hola! Soy Amando, tu asistente para asesores externos. Pregunta sobre temas operativos como aperturas, reasignaciones o transferencias.</div>
+    </div>
+    <div class="input-container">
+        <input type="text" id="userInput" placeholder="Escribe tu pregunta...">
+        <button onclick="sendMessage()">Enviar</button>
+    </div>
+    <button class="export-btn" onclick="exportLogs()">Exportar Consultas (CSV)</button>
+
+    <h2>Actualizar Base de Conocimiento (Admin)</h2>
+    <div class="kb-container hidden" id="kbContainer">
+        <div class="kb-form">
+            <input type="text" id="kbKeyword" placeholder="Palabra clave (ej: reasignar)">
+            <textarea id="kbResponse" placeholder="Respuesta (ej: Contacta a soporte...)"></textarea>
+            <button onclick="addToKnowledgeBase()">Agregar/Actualizar</button>
+        </div>
+        <table class="kb-table" id="kbTable">
+            <thead>
+                <tr>
+                    <th>Palabra Clave</th>
+                    <th>Respuesta</th>
+                    <th>Acción</th>
+                </tr>
+            </thead>
+            <tbody id="kbTableBody"></tbody>
+        </table>
+        <div class="suggestions" id="suggestions">
+            <h3>Sugerencias de Aprendizaje</h3>
+            <div id="suggestionList"></div>
+        </div>
+    </div>
+    <button onclick="promptAdminAccess()">Acceder como Admin</button>
+
+    <script>
+        // Admin password and support email
+        const ADMIN_PASSWORD = 'starlink';
+        const SUPPORT_EMAIL = 'ifamarconi@balanz.com';
+        const DEFAULT_RESPONSE = `No entiendo tu pregunta. Prueba con temas operativos como aperturas, reasignaciones o transferencias, o contacta a ${SUPPORT_EMAIL}.`;
+
+        // Synonym mapping for financial operations
+        const synonyms = {
+            'reasignar': ['cambiar', 'transferir', 'reasignación'],
+            'apertura': ['abrir', 'cuenta', 'nueva cuenta'],
+            'transferencia': ['transferir', 'mover', 'traslado'],
+            'cumplimiento': ['cnv', 'regulacion', 'normativa'],
+            'capacitacion': ['entrenamiento', 'curso', 'taller'],
+            'incorporacion': ['alta', 'nuevo cliente', 'inscripcion']
+        };
+
+        // Initial knowledge base
+        let knowledgeBase = JSON.parse(localStorage.getItem('knowledgeBase')) || {
+            "cumplimiento": "Presenta DNI, comprobante de domicilio y estados financieros en el portal de Balanz para cumplir con CNV.",
+            "capacitacion": "La próxima sesión de Balanz University está programada en Necochea. Revisa el portal de Balanz para detalles.",
+            "incorporacion": "Para incorporar un cliente como AAGI, envía sus datos a través del portal de asesores de Balanz y completa la verificación CNV.",
+            "reasignar": "Contacta a soporte en ifamarconi@balanz.com para reasignar un cliente a otro asesor.",
+            "apertura": "Para abrir una cuenta, completa el formulario en el portal de Balanz y presenta la documentación requerida.",
+            "transferencia": "Las transferencias entre cuentas requieren aprobación en el portal de Balanz. Contacta a soporte para detalles."
+        };
+
+        // Query logs, frequency, and clusters
+        let queryLogs = JSON.parse(localStorage.getItem('queryLogs')) || [];
+        let queryFrequency = JSON.parse(localStorage.getItem('queryFrequency')) || {};
+        let queryClusters = JSON.parse(localStorage.getItem('queryClusters')) || {};
+
+        // Levenshtein distance for similarity
+        function levenshteinDistance(a, b) {
+            const matrix = Array(b.length + 1).fill().map(() => Array(a.length + 1).fill(0));
+            for (let i = 0; i <= a.length; i++) matrix[0][i] = i;
+            for (let j = 0; j <= b.length; j++) matrix[j][0] = j;
+            for (let j = 1; j <= b.length; j++) {
+                for (let i = 1; i <= a.length; i++) {
+                    const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+                    matrix[j][i] = Math.min(
+                        matrix[j - 1][i] + 1,
+                        matrix[j][i - 1] + 1,
+                        matrix[j - 1][i - 1] + cost
+                    );
+                }
+            }
+            return matrix[b.length][a.length];
+        }
+
+        function saveData() {
+            localStorage.setItem('knowledgeBase', JSON.stringify(knowledgeBase));
+            localStorage.setItem('queryLogs', JSON.stringify(queryLogs));
+            localStorage.setItem('queryFrequency', JSON.stringify(queryFrequency));
+            localStorage.setItem('queryClusters', JSON.stringify(queryClusters));
+        }
+
+        function promptAdminAccess() {
+            const password = prompt('Ingresa la contraseña de administrador:');
+            if (password === ADMIN_PASSWORD) {
+                document.getElementById('kbContainer').classList.remove('hidden');
+            } else {
+                alert('Contraseña incorrecta.');
+            }
+        }
+
+        function renderKnowledgeBase() {
+            const kbTableBody = document.getElementById('kbTableBody');
+            kbTableBody.innerHTML = '';
+            for (const [keyword, response] of Object.entries(knowledgeBase)) {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${keyword}</td>
+                    <td>${response}</td>
+                    <td><button class="delete-btn" onclick="deleteFromKnowledgeBase('${keyword}')">Eliminar</button></td>
+                `;
+                kbTableBody.appendChild(row);
+            }
+        }
+
+        function addToKnowledgeBase() {
+            const keyword = document.getElementById('kbKeyword').value.trim().toLowerCase();
+            const response = document.getElementById('kbResponse').value.trim();
+            if (keyword && response) {
+                knowledgeBase[keyword] = response;
+                delete queryFrequency[keyword];
+                saveData();
+                renderKnowledgeBase();
+                renderSuggestions();
+                document.getElementById('kbKeyword').value = '';
+                document.getElementById('kbResponse').value = '';
+                alert('Base de conocimiento actualizada.');
+            } else {
+                alert('Por favor, completa ambos campos.');
+            }
+        }
+
+        function deleteFromKnowledgeBase(keyword) {
+            delete knowledgeBase[keyword];
+            saveData();
+            renderKnowledgeBase();
+        }
+
+        function findSimilarKeyword(query) {
+            let minDistance = Infinity;
+            let closestKey = null;
+            const queryWords = query.toLowerCase().split(' ');
+
+            // Check synonyms
+            for (const [key, synList] of Object.entries(synonyms)) {
+                if (queryWords.some(word => synList.includes(word) || word === key)) {
+                    return key;
+                }
+            }
+
+            // Fallback to Levenshtein distance
+            for (const key of Object.keys(knowledgeBase)) {
+                const keyWords = key.split(' ');
+                const sharedWords = queryWords.filter(word => keyWords.includes(word)).length;
+                const distance = levenshteinDistance(query, key);
+                const score = distance - sharedWords * 2; // Favor shared words
+                if (score < minDistance) {
+                    minDistance = score;
+                    closestKey = key;
+                }
+            }
+            return minDistance < 8 ? closestKey : null; // Tighter threshold for accuracy
+        }
+
+        function getQueryPriority(query) {
+            const urgentKeywords = ['cumplimiento', 'cnv', 'regulacion', 'reasignar', 'apertura', 'transferencia'];
+            return urgentKeywords.some(k => query.includes(k)) ? 2 : 1;
+        }
+
+        function clusterQuery(query) {
+            for (const [cluster, queries] of Object.entries(queryClusters)) {
+                for (const q of queries) {
+                    if (levenshteinDistance(query, q) < 8 || query.split(' ').some(word => q.includes(word))) {
+                        queryClusters[cluster].push(query);
+                        saveData();
+                        return cluster;
+                    }
+                }
+            }
+            const newCluster = `cluster_${Object.keys(queryClusters).length + 1}`;
+            queryClusters[newCluster] = [query];
+            saveData();
+            return newCluster;
+        }
+
+        function renderSuggestions() {
+            const suggestionList = document.getElementById('suggestionList');
+            suggestionList.innerHTML = '';
+            const suggestions = [];
+            for (const [query, count] of Object.entries(queryFrequency)) {
+                if (count >= 3 && !knowledgeBase[query]) {
+                    const similarKey = findSimilarKeyword(query);
+                    const suggestedResponse = similarKey
+                        ? `Basado en "${similarKey}": ${knowledgeBase[similarKey]}`
+                        : DEFAULT_RESPONSE;
+                    const priority = getQueryPriority(query) * count;
+                    suggestions.push({ query, count, suggestedResponse, priority });
+                }
+            }
+            suggestions.sort((a, b) => b.priority - a.priority);
+            for (const { query, count, suggestedResponse } of suggestions) {
+                const suggestion = document.createElement('div');
+                suggestion.classList.add('suggestion-item');
+                suggestion.innerHTML = `
+                    <p><strong>Pregunta Frecuente:</strong> ${query} (${count} veces)</p>
+                    <p><strong>Respuesta Sugerida:</strong> ${suggestedResponse}</p>
+                    <button onclick="document.getElementById('kbKeyword').value='${query}';document.getElementById('kbResponse').value='${suggestedResponse}'">Editar</button>
+                `;
+                suggestionList.appendChild(suggestion);
+            }
+        }
+
+        function sendMessage() {
+            const userInput = document.getElementById('userInput');
+            const chatContainer = document.getElementById('chatContainer');
+            const messageText = userInput.value.trim().toLowerCase();
+
+            if (messageText === '') return;
+
+            // Add user message
+            const userMessage = document.createElement('div');
+            userMessage.classList.add('message', 'user');
+            userMessage.textContent = messageText;
+            chatContainer.appendChild(userMessage);
+
+            // Log query
+            queryLogs.push({ timestamp: new Date().toISOString(), query: messageText, cluster: clusterQuery(messageText) });
+            queryFrequency[messageText] = (queryFrequency[messageText] || 0) + 1;
+            saveData();
+
+            // Check knowledge base
+            let botResponse = DEFAULT_RESPONSE;
+            let matchedKey = findSimilarKeyword(messageText);
+
+            if (matchedKey && knowledgeBase[matchedKey]) {
+                botResponse = knowledgeBase[matchedKey];
+            }
+
+            // Update suggestions if no exact match
+            if (!matchedKey) {
+                renderSuggestions();
+            }
+
+            // Add bot response
+            setTimeout(() => {
+                const botMessage = document.createElement('div');
+                botMessage.classList.add('message', 'bot');
+                botMessage.textContent = botResponse;
+                chatContainer.appendChild(botMessage);
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+            }, 300);
+
+            userInput.value = '';
+        }
+
+        function exportLogs() {
+            const csv = [
+                ['Timestamp', 'Query', 'Cluster'],
+                ...queryLogs.map(log => [log.timestamp, `"${log.query}"`, log.cluster])
+            ].map(row => row.join(',')).join('\n');
+
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'balanz_chatbot_logs.csv';
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        // Handle Enter key
+        document.getElementById('userInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendMessage();
+        });
+
+        // Initial render
+        renderKnowledgeBase();
+        renderSuggestions();
+    </script>
+</body>
+</html>
