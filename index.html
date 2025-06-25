@@ -153,6 +153,11 @@
         .hidden {
             display: none;
         }
+        .loading {
+            text-align: center;
+            padding: 10px;
+            color: #3498db;
+        }
         @media (max-width: 600px) {
             .input-container, .kb-form {
                 flex-direction: column;
@@ -162,9 +167,13 @@
             }
         }
     </style>
+    <!-- Load TensorFlow.js -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.21.0/dist/tf.min.js"></script>
+    <!-- Load Universal Sentence Encoder -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/universal-sentence-encoder@1.3.3"></script>
 </head>
 <body>
-    <h1>Chatbot - Equipo Marconi</h1>
+    <h1>Team Marconi Chatbot</h1>
     <div class="chat-container" id="chatContainer">
         <div class="message bot">¡Hola! Soy Amando, tu asistente para asesores externos. Pregunta sobre temas operativos como aperturas, reasignaciones o transferencias.</div>
     </div>
@@ -204,24 +213,42 @@
         const SUPPORT_EMAIL = 'ifamarconi@balanz.com';
         const DEFAULT_RESPONSE = `No entiendo tu pregunta. Prueba con temas operativos como aperturas, reasignaciones o transferencias, o contacta a ${SUPPORT_EMAIL}.`;
 
-        // Synonym mapping for financial operations
+        // Synonym mapping for fallback
         const synonyms = {
-            'reasignar': ['cambiar', 'transferir', 'reasignación'],
-            'apertura': ['abrir', 'cuenta', 'nueva cuenta'],
-            'transferencia': ['transferir', 'mover', 'traslado'],
+            'reasignar': ['cambiar', 'transferir', 'mover', 'reubicar'],
+            'apertura': ['abrir', 'cuenta', 'nueva cuenta', 'iniciar'],
+            'transferencia': ['transferir', 'mover', 'traslado', 'cambiar'],
             'cumplimiento': ['cnv', 'regulacion', 'normativa'],
-            'capacitacion': ['entrenamiento', 'curso', 'taller'],
-            'incorporacion': ['alta', 'nuevo cliente', 'inscripcion']
+            'capacitacion': ['entrenamiento', 'curso', 'taller', 'formacion'],
+            'incorporacion': ['alta', 'nuevo cliente', 'inscripcion', 'registro']
         };
 
         // Initial knowledge base
         let knowledgeBase = JSON.parse(localStorage.getItem('knowledgeBase')) || {
-            "cumplimiento": "Presenta DNI, comprobante de domicilio y estados financieros en el portal de Balanz para cumplir con CNV.",
-            "capacitacion": "La próxima sesión de Balanz University está programada en Necochea. Revisa el portal de Balanz para detalles.",
-            "incorporacion": "Para incorporar un cliente como AAGI, envía sus datos a través del portal de asesores de Balanz y completa la verificación CNV.",
-            "reasignar": "Contacta a soporte en ifamarconi@balanz.com para reasignar un cliente a otro asesor.",
-            "apertura": "Para abrir una cuenta, completa el formulario en el portal de Balanz y presenta la documentación requerida.",
-            "transferencia": "Las transferencias entre cuentas requieren aprobación en el portal de Balanz. Contacta a soporte para detalles."
+            "como solicitar una reasignación": "El cliente debe enviar un mail desde su casilla informada en Balanz a ifaMarconi@balanz.com con el título “Pedido de reasignación” con la siguiente información: Nombre y Apellido Cliente: Número Comitente: Número Cuotapartista: Oficial de cuenta nuevo: Antiguo asesor financiero: (lo menciona según cómo lo ve en Plataforma) Motivo de reasignación:",
+            "como fondeo la cuenta?	": "El cliente debe enviar al CBU de Balanz el dinero desde una cuenta a su nombre (matchea por CUIT)",
+            "cbu en pesos": "BIND - BANCO INDUSTRIAL Titular: Balanz Capital Valores S.A.U Cuit: 30-71063067-0 Cuenta: BIND - Pesos CBU: 3220001805004475200014 Alias: BALANZ.BIND.PESOS Nro Cuenta: 20-1-447520-1-5",
+            "como transfiero a balanz?": "El cliente debe enviar al CBU de Balanz el dinero desde una cuenta a su nombre (matchea por CUIT)",
+            "cbu en dolares	": "BIND - BANCO INDUSTRIAL Titular: Balanz Capital Valores S.A.U Cuit: 30-71063067-0 Cuenta: BIND - Dólares CBU: 3220001812004475200025 Alias: BALANZ.BIND.DOLAR Nro Cuenta: 20-1-447520-2-50",
+            "transferencia": "Contacte a su comercial para sugerencias de inversión.",
+            "donde esta arosa?": "...",
+            "reportes impositivos": "📂 Reportes Contables 📂 Se bajan desde la web desde el logo de descarga debajo del botón de operar y encima del asesor. BBPP: Pueden bajar el reporte de posición consolidada al 31/12. El mismo detalla la posición a ese día. IGG: Pueden bajar el reporte de Resultados del período. Tiene criterio PEPS. El que suelen pedir los contadores es el de resultados por realizado el cual muestra todos los activos que realizaron ganancia en el año (no cuenta resultados no realizados), pero aconsejamos enviar el completo.",
+            "reporte de ganancias y bbpp": "📂 Reportes Contables 📂 Se bajan desde la web desde el logo de descarga debajo del botón de operar y encima del asesor. BBPP: Pueden bajar el reporte de posición consolidada al 31/12. El mismo detalla la posición a ese día. IGG: Pueden bajar el reporte de Resultados del período. Tiene criterio PEPS. El que suelen pedir los contadores es el de resultados por realizado el cual muestra todos los activos que realizaron ganancia en el año (no cuenta resultados no realizados), pero aconsejamos enviar el completo.",
+            "posicion consolidada": "📂 Reportes Contables 📂 Se bajan desde la web desde el logo de descarga debajo del botón de operar y encima del asesor. BBPP: Pueden bajar el reporte de posición consolidada al 31/12. El mismo detalla la posición a ese día. IGG: Pueden bajar el reporte de Resultados del período. Tiene criterio PEPS. El que suelen pedir los contadores es el de resultados por realizado el cual muestra todos los activos que realizaron ganancia en el año (no cuenta resultados no realizados), pero aconsejamos enviar el completo.",
+            "no aparece un cupon": "💵 Cobro de renta y amortización de ONs ley NY 💵 ⏳ La acreditación en comitente local de las rentas y amortizaciones de ONs ley NY puede demorar unos días hábiles (en general hasta una semana) debido al proceso y cantidad de actores (bancos, euroclear, etc.) que implica. 📌 Les pedimos transmitirlo siempre a sus clientes para evitar dudas sobre la operatoria. 🔗 Les acercamos el link de avisos de mercado donde se publican avisos de pago, rescate anticipado, etc. por parte de las empresas para que puedan transmitirlo a sus clientes. https://bolsar.info/relevante_semestral.php",
+            "puedo enviar dinero desde una wallet del exterior?": "📢 Envío desde wallets a Balanz Les comparto el listado actualizado de billeteras virtuales desde las cuales se pueden enviar dólares por cable a Balanz: ✅ Están OK: DEEL, PAYONEER, WISE, PAYPAL, TELEPAGOS, PREX ❌ No están OK: DOLLAR AP, UTOPPIA, GRABFI, WALLBIT, TAKENOS 📌 Recordatorio importante: Siempre que envíen dinero desde una wallet, deben informarlo en la comitente para que se acredite correctamente. Por cualquier duda, nos contactan por privado!",
+            "¿como envio cables a bcv?": "DÓLAR CABLE LOCAL Bank: CITIBANK N.A, NEW YORK - SWIFT: CITIUS33 - ABA# 0210-0008-9 - Account Number: 36375429 - Account Name: Balanz Capital Valores S.A.Citibank N.A, - New York Branch -111 wall street - New York - USA 10043",
+            "como envio dolares cables a balanz local": "DÓLAR CABLE LOCAL Bank: CITIBANK N.A, NEW YORK - SWIFT: CITIUS33 - ABA# 0210-0008-9 - Account Number: 36375429 - Account Name: Balanz Capital Valores S.A.Citibank N.A, - New York Branch -111 wall street - New York - USA 10043",
+            "como endoso un echeq?": "💭 Se pueden endosar echeqs a las cuentas comitentes (no pagan imp. deb cred). 🛑 REQUISITOS: 1. Que no haya tenido endosos. 2. Que tengan una factura que los respalde (deben coincidir los CUIT del emisor de echeq y CUIT de la factura). 3. ⁠Que sean a la orden. ℹ️ PROCEDIMIENTO: 1. Enviar a ifamarconi@balanz.com la solicitud de autorización de endoso de echeq con la denominación y nro. de comitente del cliente en el asunto. Adjuntar echeqs y facturas respaldatorias. Favor de chequear los requisitos previamenta. 2. Una vez autorizados--> endosar a Balanz Capital Valores CUIT: 30-71063067-0. El depósito tiene los mismos tiempos de demora por clearing bancario (48hs.). 🕑 Horario límite de recepción de autorizaciones: 16hs.",
+            "endoso echeq": "💭 Se pueden endosar echeqs a las cuentas comitentes (no pagan imp. deb cred). 🛑 REQUISITOS: 1. Que no haya tenido endosos. 2. Que tengan una factura que los respalde (deben coincidir los CUIT del emisor de echeq y CUIT de la factura). 3. ⁠Que sean a la orden. ℹ️ PROCEDIMIENTO: 1. Enviar a ifamarconi@balanz.com la solicitud de autorización de endoso de echeq con la denominación y nro. de comitente del cliente en el asunto. Adjuntar echeqs y facturas respaldatorias. Favor de chequear los requisitos previamenta. 2. Una vez autorizados--> endosar a Balanz Capital Valores CUIT: 30-71063067-0. El depósito tiene los mismos tiempos de demora por clearing bancario (48hs.). 🕑 Horario límite de recepción de autorizaciones: 16hs.",
+            "horario money market": "Se puede rescatar a banco hasta las 19hs. y a comitente 24/7",
+            "cbu money market": "cbu money market",
+            "dolar cable local": "DÓLAR CABLE LOCAL Bank: CITIBANK N.A, NEW YORK - SWIFT: CITIUS33 - ABA# 0210-0008-9 - Account Number: 36375429 - Account Name: Balanz Capital Valores S.A.Citibank N.A, - New York Branch -111 wall street - New York - USA 10043",
+            "dolar cable bcv": "DÓLAR CABLE LOCAL Bank: CITIBANK N.A, NEW YORK - SWIFT: CITIUS33 - ABA# 0210-0008-9 - Account Number: 36375429 - Account Name: Balanz Capital Valores S.A.Citibank N.A, - New York Branch -111 wall street - New York - USA 10043",
+            "estado apertura": "En el reporte de aperturas pueden ver todas sus aperturas buscando por su apellido en caso de ser AP y por su IFA XXXX en caso de ser IFA. A su vez pueden buscar en el reporte por nombre del cliente o estado de cuenta. Los posibles estadios de cuenta son los siguientes: Inicial: El cliente aun no completo todos los datos para la apertura. El cliente debe ingresar con el link que le llegó al mail a terminar de completar los datos. KYC(Solo para APs): En este estado la cuenta se encuentra a la espera de que carguen el KYC por plataforma. En el mismo se puede especificar un arancel distinto al que usan por defecto. Carga de datos: La cuenta está en análisis por parte del equipo de aperturas. Pedido de información: Se requiere mayor documentación para dar al alta la cuenta. El equipo de aperturas debería haberles enviado un correo detallando la documentación faltante. Alta de cuenta: En cola para ser analizada por Compliance. Análisis Compliance: Compliance se encuentra analizándola. Firma cliente: En caso de ser necesaria la firma digital de algun documento. A la espera de que el cliente firme el docusign para la apertura de la cuenta. En importación: Proceso automático en el que se valida y da de alta la cuenta (en minutos debería abrir). Finalizado: Cuenta abierta",
+            "como abrir cuenta": "Pueden abrir una cuenta utilizando los links de apertura disponibles en la plataforma > configuración de cuenta",
+            "reclamo transferencia": "⏰ ¿Qué hacer si pasan más de dos horas y no llega una transferencia? 1. Chequeos: - que hayan pasado dos horas desde su emisión - que sea una transferencia inmediata (transferencias por suscursal pueden demorar hasta 2 dias) - que sea de origen “same name”. Si la cuenta bancaria tuviese cotitulares, puede haber llegado a Balanz con otro CUIT . Si ese es el caso, favor de remitir constancia de CBU donde se pueda constatar titularidad. - Chequear en Movimientos Bancarios que no haya impactado en otra comitente (caso de cliente con más de una comitente) - que esté informada 2. Reclamo: enviarnos nro de comitente nombre y comprobante Importante: Las transferencias pueden demorar algunas horas en algunas ocasiones. Es importante transmitir tranquilidad al cliente en estos casos. Recuerden que suscripcion a fci desde banco NO ES transferir a comitente y suscribir.",
+            "no me llega una transferencia": "⏰ ¿Qué hacer si pasan más de dos horas y no llega una transferencia? 1. Chequeos: - que hayan pasado dos horas desde su emisión - que sea una transferencia inmediata (transferencias por suscursal pueden demorar hasta 2 dias) - que sea de origen “same name”. Si la cuenta bancaria tuviese cotitulares, puede haber llegado a Balanz con otro CUIT . Si ese es el caso, favor de remitir constancia de CBU donde se pueda constatar titularidad. - Chequear en Movimientos Bancarios que no haya impactado en otra comitente (caso de cliente con más de una comitente) - que esté informada 2. Reclamo: enviarnos nro de comitente nombre y comprobante Importante: Las transferencias pueden demorar algunas horas en algunas ocasiones. Es importante transmitir tranquilidad al cliente en estos casos. Recuerden que suscripcion a fci desde banco NO ES transferir a comitente y suscribir."
         };
 
         // Query logs, frequency, and clusters
@@ -229,7 +256,40 @@
         let queryFrequency = JSON.parse(localStorage.getItem('queryFrequency')) || {};
         let queryClusters = JSON.parse(localStorage.getItem('queryClusters')) || {};
 
-        // Levenshtein distance for similarity
+        // AI model and embeddings
+        let model = null;
+        let knowledgeBaseEmbeddings = null;
+
+        // Load AI model
+        async function loadModel() {
+            const chatContainer = document.getElementById('chatContainer');
+            const loadingMessage = document.createElement('div');
+            loadingMessage.classList.add('message', 'bot', 'loading');
+            loadingMessage.textContent = 'Cargando modelo de inteligencia artificial...';
+            chatContainer.appendChild(loadingMessage);
+
+            model = await use.load();
+            await initializeKnowledgeBaseEmbeddings();
+
+            loadingMessage.remove();
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        // Initialize knowledge base embeddings
+        async function initializeKnowledgeBaseEmbeddings() {
+            const keys = Object.keys(knowledgeBase);
+            knowledgeBaseEmbeddings = await model.embed(keys);
+        }
+
+        // Cosine similarity for embeddings
+        function cosineSimilarity(a, b) {
+            const dotProduct = tf.sum(tf.mul(a, b));
+            const normA = tf.sqrt(tf.sum(tf.square(a)));
+            const normB = tf.sqrt(tf.sum(tf.square(b)));
+            return dotProduct.div(normA.mul(normB)).dataSync()[0];
+        }
+
+        // Levenshtein distance for fallback
         function levenshteinDistance(a, b) {
             const matrix = Array(b.length + 1).fill().map(() => Array(a.length + 1).fill(0));
             for (let i = 0; i <= a.length; i++) matrix[0][i] = i;
@@ -277,13 +337,14 @@
             }
         }
 
-        function addToKnowledgeBase() {
+        async function addToKnowledgeBase() {
             const keyword = document.getElementById('kbKeyword').value.trim().toLowerCase();
             const response = document.getElementById('kbResponse').value.trim();
             if (keyword && response) {
                 knowledgeBase[keyword] = response;
                 delete queryFrequency[keyword];
                 saveData();
+                await initializeKnowledgeBaseEmbeddings(); // Update embeddings
                 renderKnowledgeBase();
                 renderSuggestions();
                 document.getElementById('kbKeyword').value = '';
@@ -297,15 +358,26 @@
         function deleteFromKnowledgeBase(keyword) {
             delete knowledgeBase[keyword];
             saveData();
+            initializeKnowledgeBaseEmbeddings(); // Update embeddings
             renderKnowledgeBase();
         }
 
-        function findSimilarKeyword(query) {
-            let minDistance = Infinity;
-            let closestKey = null;
-            const queryWords = query.toLowerCase().split(' ');
+        async function findSimilarKeyword(query) {
+            // Try AI model first
+            if (model && knowledgeBaseEmbeddings) {
+                const queryEmbedding = await model.embed([query]);
+                const similarities = tf.tidy(() => {
+                    return knowledgeBaseEmbeddings.matMul(queryEmbedding.transpose()).dataSync();
+                });
+                const maxIndex = similarities.indexOf(Math.max(...similarities));
+                const keys = Object.keys(knowledgeBase);
+                if (similarities[maxIndex] > 0.7) { // Similarity threshold
+                    return keys[maxIndex];
+                }
+            }
 
-            // Check synonyms
+            // Fallback to synonyms
+            const queryWords = query.toLowerCase().split(' ');
             for (const [key, synList] of Object.entries(synonyms)) {
                 if (queryWords.some(word => synList.includes(word) || word === key)) {
                     return key;
@@ -313,17 +385,19 @@
             }
 
             // Fallback to Levenshtein distance
+            let minDistance = Infinity;
+            let closestKey = null;
             for (const key of Object.keys(knowledgeBase)) {
                 const keyWords = key.split(' ');
                 const sharedWords = queryWords.filter(word => keyWords.includes(word)).length;
                 const distance = levenshteinDistance(query, key);
-                const score = distance - sharedWords * 2; // Favor shared words
+                const score = distance - sharedWords * 3;
                 if (score < minDistance) {
                     minDistance = score;
                     closestKey = key;
                 }
             }
-            return minDistance < 8 ? closestKey : null; // Tighter threshold for accuracy
+            return minDistance < 8 ? closestKey : null;
         }
 
         function getQueryPriority(query) {
@@ -374,7 +448,7 @@
             }
         }
 
-        function sendMessage() {
+        async function sendMessage() {
             const userInput = document.getElementById('userInput');
             const chatContainer = document.getElementById('chatContainer');
             const messageText = userInput.value.trim().toLowerCase();
@@ -392,15 +466,15 @@
             queryFrequency[messageText] = (queryFrequency[messageText] || 0) + 1;
             saveData();
 
-            // Check knowledge base
+            // Check knowledge base with AI
             let botResponse = DEFAULT_RESPONSE;
-            let matchedKey = findSimilarKeyword(messageText);
+            const matchedKey = await findSimilarKeyword(messageText);
 
             if (matchedKey && knowledgeBase[matchedKey]) {
                 botResponse = knowledgeBase[matchedKey];
             }
 
-            // Update suggestions if no exact match
+            // Update suggestions if no match
             if (!matchedKey) {
                 renderSuggestions();
             }
@@ -437,9 +511,10 @@
             if (e.key === 'Enter') sendMessage();
         });
 
-        // Initial render
+        // Initial setup
         renderKnowledgeBase();
         renderSuggestions();
+        loadModel(); // Load AI model on page load
     </script>
 </body>
 </html>
