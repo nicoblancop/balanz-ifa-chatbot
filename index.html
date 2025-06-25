@@ -217,9 +217,9 @@
         const SUPPORT_EMAIL = 'ifamarconi@balanz.com';
         const DEFAULT_RESPONSE = `No entiendo tu pregunta. Prueba con temas operativos como aperturas, reasignaciones o transferencias, o contacta a ${SUPPORT_EMAIL}.`;
         const APP_VERSION = '1.2';
-        const GITHUB_TOKEN = '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'; // Replace with your PAT
-        const REPO_OWNER = 'nicoblancop'; // Replace with your GitHub username
-        const REPO_NAME = 'balanz-ifa-chatbot'; // Replace with your repository name
+        const DATABASE_URL = 'https://balanz-ifa-chatbot.vercel.app/api/update-database';
+        const REPO_OWNER = 'YOUR_GITHUB_USERNAME'; // Replace with your GitHub username
+        const REPO_NAME = 'balanz-ifa-chatbot';
         const DATABASE_PATH = 'database.json';
 
         // Weighted synonym mapping
@@ -326,7 +326,7 @@
             chatContainer.scrollTop = chatContainer.scrollHeight;
         }
 
-        // Update database on GitHub with retry logic
+        // Update database via Vercel API
         async function updateDatabase() {
             if (!isAdmin) return;
             const database = { knowledgeBase, queryLogs, queryFrequency, queryClusters };
@@ -335,71 +335,22 @@
 
             while (attempt < maxRetries) {
                 try {
-                    // Get current file SHA
-                    let sha = null;
-                    try {
-                        const getFileResponse = await fetch(`https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${DATABASE_PATH}`, {
-                            headers: {
-                                Authorization: `token ${GITHUB_TOKEN}`,
-                                'Accept': 'application/vnd.github.v3+json'
-                            }
-                        });
-                        if (getFileResponse.status === 404) {
-                            // File doesn't exist, create it
-                            const createResponse = await fetch(`https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${DATABASE_PATH}`, {
-                                method: 'PUT',
-                                headers: {
-                                    Authorization: `token ${GITHUB_TOKEN}`,
-                                    'Content-Type': 'application/json',
-                                    'Accept': 'application/vnd.github.v3+json'
-                                },
-                                body: JSON.stringify({
-                                    message: `Create database.json ${new Date().toISOString()}`,
-                                    content: btoa(unescape(encodeURIComponent(JSON.stringify(database, null, 2))))
-                                })
-                            });
-                            if (!createResponse.ok) {
-                                throw new Error(`HTTP ${createResponse.status}: Failed to create database`);
-                            }
-                            return;
-                        }
-                        const fileData = await getFileResponse.json();
-                        if (!getFileResponse.ok) {
-                            throw new Error(`HTTP ${getFileResponse.status}: Failed to fetch SHA`);
-                        }
-                        sha = fileData.sha;
-                    } catch (shaError) {
-                        console.error('Error fetching SHA:', shaError);
-                        throw shaError;
-                    }
-
-                    // Update file
-                    const updateResponse = await fetch(`https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${DATABASE_PATH}`, {
-                        method: 'PUT',
-                        headers: {
-                            Authorization: `token ${GITHUB_TOKEN}`,
-                            'Content-Type': 'application/json',
-                            'Accept': 'application/vnd.github.v3+json'
-                        },
-                        body: JSON.stringify({
-                            message: `Update database.json ${new Date().toISOString()}`,
-                            content: btoa(unescape(encodeURIComponent(JSON.stringify(database, null, 2)))),
-                            sha: sha
-                        })
+                    const response = await fetch(DATABASE_URL, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(database)
                     });
-
-                    if (updateResponse.ok) {
+                    if (response.ok) {
                         return;
                     } else {
-                        const errorData = await updateResponse.json();
-                        throw new Error(`HTTP ${updateResponse.status}: ${errorData.message}`);
+                        const errorData = await response.json();
+                        throw new Error(`HTTP ${response.status}: ${errorData.error}`);
                     }
                 } catch (error) {
                     attempt++;
                     console.error(`Attempt ${attempt} failed:`, error);
                     if (attempt === maxRetries) {
-                        console.error('Max retries reached. Saving locally.');
-                        alert('Error al actualizar la base de datos en GitHub. Los cambios se guardaron localmente. Detalle: ' + error.message);
+                        alert('Error al actualizar la base de datos. Los cambios se guardaron localmente. Detalle: ' + error.message);
                         return;
                     }
                     await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
@@ -407,7 +358,7 @@
             }
         }
 
-        // Save data locally and update GitHub
+        // Save data locally and update via Vercel
         function saveData() {
             localStorage.setItem('knowledgeBase', JSON.stringify(knowledgeBase));
             localStorage.setItem('queryLogs', JSON.stringify(queryLogs));
@@ -531,7 +482,7 @@
                 renderSuggestions();
                 document.getElementById('kbKeyword').value = '';
                 document.getElementById('kbResponse').value = '';
-                alert('Base de conocimiento actualizada y guardada automáticamente en GitHub.');
+                alert('Base de conocimiento actualizada y guardada automáticamente.');
             } else {
                 alert('Por favor, completa ambos campos.');
             }
@@ -542,7 +493,7 @@
             saveData();
             initializeKnowledgeBaseEmbeddings();
             renderKnowledgeBase();
-            alert('Entrada eliminada y guardada automáticamente en GitHub.');
+            alert('Entrada eliminada y guardada automáticamente.');
         }
 
         async function findSimilarKeyword(query) {
