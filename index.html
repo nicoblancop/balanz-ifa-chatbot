@@ -212,10 +212,15 @@
     <button onclick="promptAdminAccess()">Acceder como Admin</button>
 
     <script>
-        // Admin password and support email
+        // Configuration
         const ADMIN_PASSWORD = 'starlink';
         const SUPPORT_EMAIL = 'ifamarconi@balanz.com';
         const DEFAULT_RESPONSE = `No entiendo tu pregunta. Prueba con temas operativos como aperturas, reasignaciones o transferencias, o contacta a ${SUPPORT_EMAIL}.`;
+        const APP_VERSION = '1.2';
+        const GITHUB_TOKEN = 'YOUR_GITHUB_TOKEN'; // Replace with your PAT
+        const REPO_OWNER = 'YOUR_GITHUB_USERNAME'; // Replace with your GitHub username
+        const REPO_NAME = 'balanz-ifa-chatbot'; // Replace with your repository name
+        const DATABASE_PATH = 'database.json';
 
         // Weighted synonym mapping
         const synonyms = {
@@ -244,8 +249,8 @@
             'no me llega una transferencia': [{ word: 'transferencia no llega', weight: 0.9 }, { word: 'demora transferencia', weight: 0.8 }]
         };
 
-        // Initial knowledge base
-        let knowledgeBase = JSON.parse(localStorage.getItem('knowledgeBase')) || {
+        // Initial knowledge base (fallback)
+        const initialKnowledgeBase = {
             "como solicitar una reasignación": "El cliente debe enviar un mail desde su casilla informada en Balanz a ifaMarconi@balanz.com con el título “Pedido de reasignación” con la siguiente información: Nombre y Apellido Cliente: Número Comitente: Número Cuotapartista: Oficial de cuenta nuevo: Antiguo asesor financiero: (lo menciona según cómo lo ve en Plataforma) Motivo de reasignación:",
             "como fondeo la cuenta bancaria?": "El cliente debe enviar al CBU de Balanz el dinero desde una cuenta a su nombre (matchea por CUIT)",
             "cbu en pesos": "BIND - BANCO INDUSTRIAL Titular: Balanz Capital Valores S.A.U Cuit: 30-71063067-0 Cuenta: BIND - Pesos CBU: 3220001805004475200014 Alias: BALANZ.BIND.PESOS Nro Cuenta: 20-1-447520-1-5",
@@ -269,25 +274,109 @@
             "estado apertura": "En el reporte de aperturas pueden ver todas sus aperturas buscando por su apellido en caso de ser AP y por su IFA XXXX en caso de ser IFA. A su vez pueden buscar en el reporte por nombre del cliente o estado de cuenta. Los posibles estadios de cuenta son los siguientes: Inicial: El cliente aun no completo todos los datos para la apertura. El cliente debe ingresar con el link que le llegó al mail a terminar de completar los datos. KYC(Solo para APs): En este estado la cuenta se encuentra a la espera de que carguen el KYC por plataforma. En el mismo se puede especificar un arancel distinto al que usan por defecto. Carga de datos: La cuenta está en análisis por parte del equipo de aperturas. Pedido de información: Se requiere mayor documentación para dar al alta la cuenta. El equipo de aperturas debería haberles enviado un correo detallando la documentación faltante. Alta de cuenta: En cola para ser analizada por Compliance. Análisis Compliance: Compliance se encuentra analizándola. Firma cliente: En caso de ser necesaria la firma digital de algun documento. A la espera de que el cliente firme el docusign para la apertura de la cuenta. En importación: Proceso automático en el que se valida y da de alta la cuenta (en minutos debería abrir). Finalizado: Cuenta abierta",
             "como abrir cuenta": "Pueden abrir una cuenta utilizando los links de apertura disponibles en la plataforma > configuración de cuenta",
             "reclamo transferencia": "⏰ ¿Qué hacer si pasan más de dos horas y no llega una transferencia? 1. Chequeos: - que hayan pasado dos horas desde su emisión - que sea una transferencia inmediata (transferencias por suscursal pueden demorar hasta 2 dias) - que sea de origen “same name”. Si la cuenta bancaria tuviese cotitulares, puede haber llegado a Balanz con otro CUIT . Si ese es el caso, favor de remitir constancia de CBU donde se pueda constatar titularidad. - Chequear en Movimientos Bancarios que no haya impactado en otra comitente (caso de cliente con más de una comitente) - que esté informada 2. Reclamo: enviarnos nro de comitente nombre y comprobante Importante: Las transferencias pueden demorar algunas horas en algunas ocasiones. Es importante transmitir tranquilidad al cliente en estos casos. Recuerden que suscripcion a fci desde banco NO ES transferir a comitente y suscribir.",
-            "no me llega una transferencia": "⏰ ¿Qué hacer si pasan más de dos horas y no llega una transferencia? 1. Chequeos: - que hayan pasado dos horas desde su emisión - que sea una transferencia inmediata (transferencias por suscursal pueden demorar hasta 2 dias) - que sea de origen “same name”. Si la cuenta bancaria tuviese cotitulares, puede haber llegado a Balanz con otro CUIT . Si ese es el caso, favor de remitir constancia de CBU donde se pueda constatar titularidad. - Chequear en Movimientos Bancarios que no haya impactado en otra comitente (caso de cliente con más de una comitente) - que esté informada 2. Reclamo: enviarnos nro de comitente nombre y comprobante Importante: Las transferencias pueden demorar algunas horas en algunas ocasiones. Es importante transmitir tranquilidad al cliente en estos casos. Recuerden que suscripcion a fci desde banco NO ES transferir a comitente y suscribir."
+            "no me llega una transferencia": "⏰ ¿Qué hacer si pasan más de dos horas y no llega una transferencia? 1. Chequeos: - que hayan pasado dos horas desde su emisión - que sea una transferencia inmediata (transferencias por suscursal pueden demorar hasta 2 dias) - que sea de origen “same name”. Si la cuenta bancaria tuviese cotitulares, puede haber llegado a Balanz con otro CUIT . Si ese es el caso, favor de remitir constancia of CBU donde se pueda constatar titularidad. - Chequear en Movimientos Bancarios que no haya impactado en otra comitente (caso de cliente con más de una comitente) - que esté informada 2. Reclamo: enviarnos nro de comitente nombre y comprobante Importante: Las transferencias pueden demorar algunas horas en algunas ocasiones. Es importante transmitir tranquilidad al cliente en estos casos. Recuerden que suscripcion a fci desde banco NO ES transferir a comitente y suscribir."
         };
 
-        // Query logs, frequency, and clusters
-        let queryLogs = JSON.parse(localStorage.getItem('queryLogs')) || [];
-        let queryFrequency = JSON.parse(localStorage.getItem('queryFrequency')) || {};
-        let queryClusters = JSON.parse(localStorage.getItem('queryClusters')) || {};
-
-        // AI model and embeddings
+        // Data initialization
+        let knowledgeBase = null;
+        let queryLogs = [];
+        let queryFrequency = {};
+        let queryClusters = {};
         let model = null;
         let knowledgeBaseEmbeddings = null;
         let debugMode = false;
+        let isAdmin = false;
+
+        // Fetch database from GitHub
+        async function fetchDatabase() {
+            try {
+                const response = await fetch(`https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/${DATABASE_PATH}?v=${APP_VERSION}`);
+                if (response.ok) {
+                    const data = await response.json();
+                    knowledgeBase = data.knowledgeBase || initialKnowledgeBase;
+                    queryLogs = data.queryLogs || [];
+                    queryFrequency = data.queryFrequency || {};
+                    queryClusters = data.queryClusters || {};
+                    localStorage.setItem('knowledgeBase', JSON.stringify(knowledgeBase));
+                    localStorage.setItem('queryLogs', JSON.stringify(queryLogs));
+                    localStorage.setItem('queryFrequency', JSON.stringify(queryFrequency));
+                    localStorage.setItem('queryClusters', JSON.stringify(queryClusters));
+                    localStorage.setItem('appVersion', APP_VERSION);
+                } else {
+                    throw new Error('Failed to fetch database');
+                }
+            } catch (error) {
+                console.error('Error fetching database:', error);
+                knowledgeBase = JSON.parse(localStorage.getItem('knowledgeBase')) || initialKnowledgeBase;
+                queryLogs = JSON.parse(localStorage.getItem('queryLogs')) || [];
+                queryFrequency = JSON.parse(localStorage.getItem('queryFrequency')) || {};
+                queryClusters = JSON.parse(localStorage.getItem('queryClusters')) || {};
+            }
+        }
+
+        // Update database on GitHub
+        async function updateDatabase() {
+            if (!isAdmin) return; // Only admins can update
+            const database = { knowledgeBase, queryLogs, queryFrequency, queryClusters };
+            try {
+                // Get current file SHA
+                const getFileResponse = await fetch(`https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${DATABASE_PATH}`, {
+                    headers: { Authorization: `token ${GITHUB_TOKEN}` }
+                });
+                const fileData = await getFileResponse.json();
+                const sha = fileData.sha;
+
+                // Update file
+                const updateResponse = await fetch(`https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${DATABASE_PATH}`, {
+                    method: 'PUT',
+                    headers: {
+                        Authorization: `token ${GITHUB_TOKEN}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        message: `Update database.json ${new Date().toISOString()}`,
+                        content: btoa(unescape(encodeURIComponent(JSON.stringify(database, null, 2)))),
+                        sha: sha
+                    })
+                });
+
+                if (!updateResponse.ok) {
+                    throw new Error('Failed to update database');
+                }
+            } catch (error) {
+                console.error('Error updating database:', error);
+                alert('Error al actualizar la base de datos en GitHub. Los cambios se guardaron localmente.');
+            }
+        }
+
+        // Save data locally and update GitHub
+        function saveData() {
+            localStorage.setItem('knowledgeBase', JSON.stringify(knowledgeBase));
+            localStorage.setItem('queryLogs', JSON.stringify(queryLogs));
+            localStorage.setItem('queryFrequency', JSON.stringify(queryFrequency));
+            localStorage.setItem('queryClusters', JSON.stringify(queryClusters));
+            localStorage.setItem('appVersion', APP_VERSION);
+            updateDatabase();
+        }
+
+        // Download database
+        function downloadDatabase() {
+            const database = { knowledgeBase, queryLogs, queryFrequency, queryClusters };
+            const blob = new Blob([JSON.stringify(database, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'balanz_chatbot_database.json';
+            a.click();
+            URL.revokeObjectURL(url);
+        }
 
         // Normalize text
         function normalizeText(text) {
             return text
                 .toLowerCase()
-                .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // Remove accents
-                .replace(/\b(de|la|el|los|las|un|una|en|para|con|por|que)\b/g, '') // Remove stop words
+                .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+                .replace(/\b(de|la|el|los|las|un|una|en|para|con|por|que)\b/g, '')
                 .trim();
         }
 
@@ -343,33 +432,10 @@
             return matrix[b.length][a.length];
         }
 
-        function saveData() {
-            localStorage.setItem('knowledgeBase', JSON.stringify(knowledgeBase));
-            localStorage.setItem('queryLogs', JSON.stringify(queryLogs));
-            localStorage.setItem('queryFrequency', JSON.stringify(queryFrequency));
-            localStorage.setItem('queryClusters', JSON.stringify(queryClusters));
-        }
-
-        // Download database
-        function downloadDatabase() {
-            const database = {
-                knowledgeBase,
-                queryLogs,
-                queryFrequency,
-                queryClusters
-            };
-            const blob = new Blob([JSON.stringify(database, null, 2)], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'balanz_chatbot_database.json';
-            a.click();
-            URL.revokeObjectURL(url);
-        }
-
         function promptAdminAccess() {
             const password = prompt('Ingresa la contraseña de administrador:');
             if (password === ADMIN_PASSWORD) {
+                isAdmin = true;
                 document.getElementById('kbContainer').classList.remove('hidden');
             } else {
                 alert('Contraseña incorrecta.');
@@ -425,35 +491,30 @@
             const normalizedQuery = normalizeText(query);
             let bestMatch = { key: null, score: 0 };
 
-            // AI matching
             if (model && knowledgeBaseEmbeddings) {
                 const queryEmbedding = await model.embed([normalizedQuery]);
                 const similarities = tf.tidy(() => {
-                    return knowledgeBaseEmbeddings.matMul(queryEmbedding.transpose()).dataSync();
-                });
+                    knowledgeBaseEmbeddings.matMul(queryEmbedding.transpose()).dataSync();
                 const maxIndex = similarities.indexOf(Math.max(...similarities));
                 const keys = Object.keys(knowledgeBase);
                 if (similarities[maxIndex] > 0.85) {
                     bestMatch = { key: keys[maxIndex], score: similarities[maxIndex] };
                 }
 
-                // Debug logging
                 if (debugMode) {
                     const debugLog = document.getElementById('debugLog');
                     const debugItem = document.createElement('div');
                     debugItem.classList.add('debug-item');
-                    debugItem.innerHTML = `<p><strong>Query:</strong> ${query}</p><p><strong>AI Match:</strong> ${keys[maxIndex]} (Score: ${similarities[maxIndex].toFixed(3)})</p>`;
+                    debugItem.textContent = `<p><strong>Query:</strong> ${query}</p><p><strong>AI Match:</strong> ${keys[maxIndex}]} (Score: ${similarities[maxIndex].toFixed(3)})</p>`;
                     debugLog.appendChild(debugItem);
                     debugLog.scrollTop = debugLog.scrollHeight;
                 }
             }
 
-            // Synonym matching
-            const queryWords = normalizedQuery.split(' ');
-            for (const [key, synList] of Object.entries(synonyms)) {
+            const queryWords = normalizedQuery.split(' ').filter(word => word.length >  for (const [key, synList] of Object.entries(synonyms)) {
                 for (const { word, weight } of synList) {
                     if (queryWords.some(q => normalizeText(q).includes(normalizeText(word)))) {
-                        const score = weight * 0.9; // Scale synonym score
+                        const score = weight * 0.9;
                         if (score > bestMatch.score) {
                             bestMatch = { key, score };
                         }
@@ -461,13 +522,12 @@
                 }
             }
 
-            // Levenshtein fallback
             let minDistance = Infinity;
             let closestKey = null;
             for (const key of Object.keys(knowledgeBase)) {
                 const distance = levenshteinDistance(normalizedQuery, normalizeText(key));
-                const score = (1 - distance / Math.max(normalizedQuery.length, key.length)) * 0.8; // Scale Levenshtein score
-                if (score > bestMatch.score && distance < 5) {
+                const score = (1 - distance / Math.max(normalizedQuery.length, key.length)) * 0.8;
+                if (score > bestMatch.score && distance < 6) {
                     bestMatch = { key, score };
                 }
                 if (distance < minDistance) {
@@ -476,7 +536,7 @@
                 }
             }
 
-            return bestMatch.key || (minDistance < 5 ? closestKey : null);
+            return bestMatch.key || (minDistance < 6 ? closestKey : null);
         }
 
         function getQueryPriority(query) {
@@ -488,7 +548,7 @@
             const normalizedQuery = normalizeText(query);
             for (const [cluster, queries] of Object.entries(queryClusters)) {
                 for (const q of queries) {
-                    if (levenshteinDistance(normalizedQuery, normalizeText(q)) < 5 || normalizedQuery.split(' ').some(word => normalizeText(q).includes(word))) {
+                    if (levenshteinDistance(normalizedQuery, normalizeText(q)) < 6 || normalizedQuery.split(' ').some(word => normalizeText(q).includes(word))) {
                         queryClusters[cluster].push(query);
                         saveData();
                         return cluster;
@@ -506,7 +566,7 @@
             suggestionList.innerHTML = '';
             const suggestions = [];
             for (const [query, count] of Object.entries(queryFrequency)) {
-                if (count >= 3 && !knowledgeBase[normalizeText(query)]) {
+                if (count >= 3 && !Object.keys(knowledgeBase).includes(normalizeText(query))) {
                     const similarKey = findSimilarKeyword(query);
                     const suggestedResponse = similarKey ? `Basado en "${similarKey}": ${knowledgeBase[similarKey]}` : DEFAULT_RESPONSE;
                     const priority = getQueryPriority(query) * count;
@@ -514,7 +574,7 @@
                 }
             }
             suggestions.sort((a, b) => b.priority - a.priority);
-            for (const { query, count, suggestedResponse } of suggestions) {
+            suggestions.forEach(({ query, count, suggestedResponse }) => {
                 const suggestion = document.createElement('div');
                 suggestion.classList.add('suggestion-item');
                 suggestion.innerHTML = `
@@ -523,7 +583,7 @@
                     <button onclick="document.getElementById('kbKeyword').value='${query}';document.getElementById('kbResponse').value='${suggestedResponse}'">Editar</button>
                 `;
                 suggestionList.appendChild(suggestion);
-            }
+            });
         }
 
         async function sendMessage() {
@@ -567,7 +627,7 @@
         function exportLogs() {
             const csv = [
                 ['Timestamp', 'Query', 'Cluster'],
-                ...queryLogs.map(log => [log.timestamp, `"${log.query}"`, log.cluster])
+                ...queryLogs.map(log => [log.timestamp, `"${log.query.replace(/"/g, '""')}"`, log.cluster])
             ].map(row => row.join(',')).join('\n');
 
             const blob = new Blob([csv], { type: 'text/csv' });
@@ -583,9 +643,15 @@
             if (e.key === 'Enter') sendMessage();
         });
 
-        renderKnowledgeBase();
-        renderSuggestions();
-        loadModel();
+        // Initialize
+        async function initialize() {
+            await fetchDatabase();
+            renderKnowledgeBase();
+            renderSuggestions();
+            await loadModel();
+        }
+
+        initialize();
     </script>
 </body>
 </html>
