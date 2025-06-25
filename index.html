@@ -42,7 +42,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Balanz IFA Intelligent Chatbot</title>
+    <title>Team Marconi Chatbot</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -112,13 +112,13 @@
         button:hover {
             background-color: #2980b9;
         }
-        .export-btn {
+        .export-btn, .download-db-btn {
             display: block;
             margin: 10px auto;
             padding: 8px 16px;
             background-color: #2ecc71;
         }
-        .export-btn:hover {
+        .export-btn:hover, .download-db-btn:hover {
             background-color: #27ae60;
         }
         .kb-table {
@@ -141,10 +141,10 @@
         .delete-btn:hover {
             background-color: #c0392b;
         }
-        .suggestions {
+        .suggestions, .debug-container {
             margin-top: 20px;
         }
-        .suggestion-item {
+        .suggestion-item, .debug-item {
             background-color: #f9f9f9;
             padding: 10px;
             margin-bottom: 5px;
@@ -167,9 +167,7 @@
             }
         }
     </style>
-    <!-- Load TensorFlow.js -->
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.21.0/dist/tf.min.js"></script>
-    <!-- Load Universal Sentence Encoder -->
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/universal-sentence-encoder@1.3.3"></script>
 </head>
 <body>
@@ -200,10 +198,16 @@
             </thead>
             <tbody id="kbTableBody"></tbody>
         </table>
-        <div class="suggestions" id="suggestions">
+        <div class="suggestions">
             <h3>Sugerencias de Aprendizaje</h3>
             <div id="suggestionList"></div>
         </div>
+        <div class="debug-container hidden" id="debugContainer">
+            <h3>Debug (Admin)</h3>
+            <button onclick="toggleDebug()">Alternar Debug</button>
+            <div id="debugLog"></div>
+        </div>
+        <button class="download-db-btn" onclick="downloadDatabase()">Descargar Base de Datos (JSON)</button>
     </div>
     <button onclick="promptAdminAccess()">Acceder como Admin</button>
 
@@ -213,23 +217,40 @@
         const SUPPORT_EMAIL = 'ifamarconi@balanz.com';
         const DEFAULT_RESPONSE = `No entiendo tu pregunta. Prueba con temas operativos como aperturas, reasignaciones o transferencias, o contacta a ${SUPPORT_EMAIL}.`;
 
-        // Synonym mapping for fallback
+        // Weighted synonym mapping
         const synonyms = {
-            'reasignar': ['cambiar', 'transferir', 'mover', 'reubicar'],
-            'apertura': ['abrir', 'cuenta', 'nueva cuenta', 'iniciar'],
-            'transferencia': ['transferir', 'mover', 'traslado', 'cambiar'],
-            'cumplimiento': ['cnv', 'regulacion', 'normativa'],
-            'capacitacion': ['entrenamiento', 'curso', 'taller', 'formacion'],
-            'incorporacion': ['alta', 'nuevo cliente', 'inscripcion', 'registro']
+            'como solicitar una reasignación': [{ word: 'reasignar', weight: 0.9 }, { word: 'cambiar cliente', weight: 0.8 }, { word: 'transferir cliente', weight: 0.7 }],
+            'como fondeo la cuenta bancaria?': [{ word: 'fondear', weight: 0.9 }, { word: 'depositar', weight: 0.8 }],
+            'cbu en pesos': [{ word: 'cbu pesos', weight: 0.9 }, { word: 'cuenta pesos', weight: 0.8 }],
+            'como transfiero a balanz?': [{ word: 'transferir', weight: 0.9 }, { word: 'enviar dinero', weight: 0.8 }],
+            'cbu en dolares': [{ word: 'cbu dolares', weight: 0.9 }, { word: 'cuenta dolares', weight: 0.8 }],
+            'transferencia': [{ word: 'transferir', weight: 0.9 }, { word: 'mover fondos', weight: 0.7 }],
+            'reportes impositivos': [{ word: 'impuestos', weight: 0.9 }, { word: 'reporte fiscal', weight: 0.8 }],
+            'reporte de ganancias y bbpp': [{ word: 'ganancias', weight: 0.9 }, { word: 'bbpp', weight: 0.8 }],
+            'posicion consolidada': [{ word: 'consolidada', weight: 0.9 }, { word: 'reporte posicion', weight: 0.8 }],
+            'no aparece un cupon': [{ word: 'cupon', weight: 0.9 }, { word: 'renta', weight: 0.8 }],
+            'puedo enviar dinero desde una wallet del exterior?': [{ word: 'wallet', weight: 0.9 }, { word: 'billetera', weight: 0.8 }],
+            'como envio cables a bcv?': [{ word: 'cable', weight: 0.9 }, { word: 'dolar cable', weight: 0.8 }],
+            'como envio dolares cables a balanz local': [{ word: 'cable dolares', weight: 0.9 }, { word: 'enviar dolares', weight: 0.8 }],
+            'como endoso un echeq?': [{ word: 'endosar', weight: 0.9 }, { word: 'echeq', weight: 0.8 }],
+            'endoso echeq': [{ word: 'endosar echeq', weight: 0.9 }, { word: 'transferir echeq', weight: 0.8 }],
+            'horario money market': [{ word: 'money market', weight: 0.9 }, { word: 'horario fci', weight: 0.8 }],
+            'cbu money market': [{ word: 'cbu fci', weight: 0.9 }, { word: 'cuenta money market', weight: 0.8 }],
+            'dolar cable local': [{ word: 'cable local', weight: 0.9 }, { word: 'dolar local', weight: 0.8 }],
+            'dolar cable bcv': [{ word: 'cable bcv', weight: 0.9 }, { word: 'dolar bcv', weight: 0.8 }],
+            'estado apertura': [{ word: 'apertura estado', weight: 0.9 }, { word: 'status cuenta', weight: 0.8 }],
+            'como abrir cuenta': [{ word: 'abrir cuenta', weight: 0.9 }, { word: 'nueva cuenta', weight: 0.8 }],
+            'reclamo transferencia': [{ word: 'transferencia demora', weight: 0.9 }, { word: 'reclamo', weight: 0.8 }],
+            'no me llega una transferencia': [{ word: 'transferencia no llega', weight: 0.9 }, { word: 'demora transferencia', weight: 0.8 }]
         };
 
         // Initial knowledge base
         let knowledgeBase = JSON.parse(localStorage.getItem('knowledgeBase')) || {
             "como solicitar una reasignación": "El cliente debe enviar un mail desde su casilla informada en Balanz a ifaMarconi@balanz.com con el título “Pedido de reasignación” con la siguiente información: Nombre y Apellido Cliente: Número Comitente: Número Cuotapartista: Oficial de cuenta nuevo: Antiguo asesor financiero: (lo menciona según cómo lo ve en Plataforma) Motivo de reasignación:",
-            "como fondeo la cuenta?	": "El cliente debe enviar al CBU de Balanz el dinero desde una cuenta a su nombre (matchea por CUIT)",
+            "como fondeo la cuenta bancaria?": "El cliente debe enviar al CBU de Balanz el dinero desde una cuenta a su nombre (matchea por CUIT)",
             "cbu en pesos": "BIND - BANCO INDUSTRIAL Titular: Balanz Capital Valores S.A.U Cuit: 30-71063067-0 Cuenta: BIND - Pesos CBU: 3220001805004475200014 Alias: BALANZ.BIND.PESOS Nro Cuenta: 20-1-447520-1-5",
             "como transfiero a balanz?": "El cliente debe enviar al CBU de Balanz el dinero desde una cuenta a su nombre (matchea por CUIT)",
-            "cbu en dolares	": "BIND - BANCO INDUSTRIAL Titular: Balanz Capital Valores S.A.U Cuit: 30-71063067-0 Cuenta: BIND - Dólares CBU: 3220001812004475200025 Alias: BALANZ.BIND.DOLAR Nro Cuenta: 20-1-447520-2-50",
+            "cbu en dolares": "BIND - BANCO INDUSTRIAL Titular: Balanz Capital Valores S.A.U Cuit: 30-71063067-0 Cuenta: BIND - Dólares CBU: 3220001812004475200025 Alias: BALANZ.BIND.DOLAR Nro Cuenta: 20-1-447520-2-50",
             "transferencia": "Contacte a su comercial para sugerencias de inversión.",
             "donde esta arosa?": "...",
             "reportes impositivos": "📂 Reportes Contables 📂 Se bajan desde la web desde el logo de descarga debajo del botón de operar y encima del asesor. BBPP: Pueden bajar el reporte de posición consolidada al 31/12. El mismo detalla la posición a ese día. IGG: Pueden bajar el reporte de Resultados del período. Tiene criterio PEPS. El que suelen pedir los contadores es el de resultados por realizado el cual muestra todos los activos que realizaron ganancia en el año (no cuenta resultados no realizados), pero aconsejamos enviar el completo.",
@@ -237,7 +258,7 @@
             "posicion consolidada": "📂 Reportes Contables 📂 Se bajan desde la web desde el logo de descarga debajo del botón de operar y encima del asesor. BBPP: Pueden bajar el reporte de posición consolidada al 31/12. El mismo detalla la posición a ese día. IGG: Pueden bajar el reporte de Resultados del período. Tiene criterio PEPS. El que suelen pedir los contadores es el de resultados por realizado el cual muestra todos los activos que realizaron ganancia en el año (no cuenta resultados no realizados), pero aconsejamos enviar el completo.",
             "no aparece un cupon": "💵 Cobro de renta y amortización de ONs ley NY 💵 ⏳ La acreditación en comitente local de las rentas y amortizaciones de ONs ley NY puede demorar unos días hábiles (en general hasta una semana) debido al proceso y cantidad de actores (bancos, euroclear, etc.) que implica. 📌 Les pedimos transmitirlo siempre a sus clientes para evitar dudas sobre la operatoria. 🔗 Les acercamos el link de avisos de mercado donde se publican avisos de pago, rescate anticipado, etc. por parte de las empresas para que puedan transmitirlo a sus clientes. https://bolsar.info/relevante_semestral.php",
             "puedo enviar dinero desde una wallet del exterior?": "📢 Envío desde wallets a Balanz Les comparto el listado actualizado de billeteras virtuales desde las cuales se pueden enviar dólares por cable a Balanz: ✅ Están OK: DEEL, PAYONEER, WISE, PAYPAL, TELEPAGOS, PREX ❌ No están OK: DOLLAR AP, UTOPPIA, GRABFI, WALLBIT, TAKENOS 📌 Recordatorio importante: Siempre que envíen dinero desde una wallet, deben informarlo en la comitente para que se acredite correctamente. Por cualquier duda, nos contactan por privado!",
-            "¿como envio cables a bcv?": "DÓLAR CABLE LOCAL Bank: CITIBANK N.A, NEW YORK - SWIFT: CITIUS33 - ABA# 0210-0008-9 - Account Number: 36375429 - Account Name: Balanz Capital Valores S.A.Citibank N.A, - New York Branch -111 wall street - New York - USA 10043",
+            "como envio cables a bcv?": "DÓLAR CABLE LOCAL Bank: CITIBANK N.A, NEW YORK - SWIFT: CITIUS33 - ABA# 0210-0008-9 - Account Number: 36375429 - Account Name: Balanz Capital Valores S.A.Citibank N.A, - New York Branch -111 wall street - New York - USA 10043",
             "como envio dolares cables a balanz local": "DÓLAR CABLE LOCAL Bank: CITIBANK N.A, NEW YORK - SWIFT: CITIUS33 - ABA# 0210-0008-9 - Account Number: 36375429 - Account Name: Balanz Capital Valores S.A.Citibank N.A, - New York Branch -111 wall street - New York - USA 10043",
             "como endoso un echeq?": "💭 Se pueden endosar echeqs a las cuentas comitentes (no pagan imp. deb cred). 🛑 REQUISITOS: 1. Que no haya tenido endosos. 2. Que tengan una factura que los respalde (deben coincidir los CUIT del emisor de echeq y CUIT de la factura). 3. ⁠Que sean a la orden. ℹ️ PROCEDIMIENTO: 1. Enviar a ifamarconi@balanz.com la solicitud de autorización de endoso de echeq con la denominación y nro. de comitente del cliente en el asunto. Adjuntar echeqs y facturas respaldatorias. Favor de chequear los requisitos previamenta. 2. Una vez autorizados--> endosar a Balanz Capital Valores CUIT: 30-71063067-0. El depósito tiene los mismos tiempos de demora por clearing bancario (48hs.). 🕑 Horario límite de recepción de autorizaciones: 16hs.",
             "endoso echeq": "💭 Se pueden endosar echeqs a las cuentas comitentes (no pagan imp. deb cred). 🛑 REQUISITOS: 1. Que no haya tenido endosos. 2. Que tengan una factura que los respalde (deben coincidir los CUIT del emisor de echeq y CUIT de la factura). 3. ⁠Que sean a la orden. ℹ️ PROCEDIMIENTO: 1. Enviar a ifamarconi@balanz.com la solicitud de autorización de endoso de echeq con la denominación y nro. de comitente del cliente en el asunto. Adjuntar echeqs y facturas respaldatorias. Favor de chequear los requisitos previamenta. 2. Una vez autorizados--> endosar a Balanz Capital Valores CUIT: 30-71063067-0. El depósito tiene los mismos tiempos de demora por clearing bancario (48hs.). 🕑 Horario límite de recepción de autorizaciones: 16hs.",
@@ -259,6 +280,16 @@
         // AI model and embeddings
         let model = null;
         let knowledgeBaseEmbeddings = null;
+        let debugMode = false;
+
+        // Normalize text
+        function normalizeText(text) {
+            return text
+                .toLowerCase()
+                .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // Remove accents
+                .replace(/\b(de|la|el|los|las|un|una|en|para|con|por|que)\b/g, '') // Remove stop words
+                .trim();
+        }
 
         // Load AI model
         async function loadModel() {
@@ -268,20 +299,25 @@
             loadingMessage.textContent = 'Cargando modelo de inteligencia artificial...';
             chatContainer.appendChild(loadingMessage);
 
-            model = await use.load();
-            await initializeKnowledgeBaseEmbeddings();
-
+            try {
+                model = await use.load();
+                await initializeKnowledgeBaseEmbeddings();
+            } catch (error) {
+                console.error('Error loading AI model:', error);
+                loadingMessage.textContent = 'Error cargando modelo AI. Usando modo fallback.';
+                setTimeout(() => loadingMessage.remove(), 3000);
+            }
             loadingMessage.remove();
             chatContainer.scrollTop = chatContainer.scrollHeight;
         }
 
         // Initialize knowledge base embeddings
         async function initializeKnowledgeBaseEmbeddings() {
-            const keys = Object.keys(knowledgeBase);
+            const keys = Object.keys(knowledgeBase).map(normalizeText);
             knowledgeBaseEmbeddings = await model.embed(keys);
         }
 
-        // Cosine similarity for embeddings
+        // Cosine similarity
         function cosineSimilarity(a, b) {
             const dotProduct = tf.sum(tf.mul(a, b));
             const normA = tf.sqrt(tf.sum(tf.square(a)));
@@ -289,7 +325,7 @@
             return dotProduct.div(normA.mul(normB)).dataSync()[0];
         }
 
-        // Levenshtein distance for fallback
+        // Levenshtein distance
         function levenshteinDistance(a, b) {
             const matrix = Array(b.length + 1).fill().map(() => Array(a.length + 1).fill(0));
             for (let i = 0; i <= a.length; i++) matrix[0][i] = i;
@@ -314,6 +350,23 @@
             localStorage.setItem('queryClusters', JSON.stringify(queryClusters));
         }
 
+        // Download database
+        function downloadDatabase() {
+            const database = {
+                knowledgeBase,
+                queryLogs,
+                queryFrequency,
+                queryClusters
+            };
+            const blob = new Blob([JSON.stringify(database, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'balanz_chatbot_database.json';
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
         function promptAdminAccess() {
             const password = prompt('Ingresa la contraseña de administrador:');
             if (password === ADMIN_PASSWORD) {
@@ -321,6 +374,12 @@
             } else {
                 alert('Contraseña incorrecta.');
             }
+        }
+
+        function toggleDebug() {
+            debugMode = !debugMode;
+            const debugContainer = document.getElementById('debugContainer');
+            debugContainer.classList.toggle('hidden', !debugMode);
         }
 
         function renderKnowledgeBase() {
@@ -344,7 +403,7 @@
                 knowledgeBase[keyword] = response;
                 delete queryFrequency[keyword];
                 saveData();
-                await initializeKnowledgeBaseEmbeddings(); // Update embeddings
+                await initializeKnowledgeBaseEmbeddings();
                 renderKnowledgeBase();
                 renderSuggestions();
                 document.getElementById('kbKeyword').value = '';
@@ -358,57 +417,78 @@
         function deleteFromKnowledgeBase(keyword) {
             delete knowledgeBase[keyword];
             saveData();
-            initializeKnowledgeBaseEmbeddings(); // Update embeddings
+            initializeKnowledgeBaseEmbeddings();
             renderKnowledgeBase();
         }
 
         async function findSimilarKeyword(query) {
-            // Try AI model first
+            const normalizedQuery = normalizeText(query);
+            let bestMatch = { key: null, score: 0 };
+
+            // AI matching
             if (model && knowledgeBaseEmbeddings) {
-                const queryEmbedding = await model.embed([query]);
+                const queryEmbedding = await model.embed([normalizedQuery]);
                 const similarities = tf.tidy(() => {
                     return knowledgeBaseEmbeddings.matMul(queryEmbedding.transpose()).dataSync();
                 });
                 const maxIndex = similarities.indexOf(Math.max(...similarities));
                 const keys = Object.keys(knowledgeBase);
-                if (similarities[maxIndex] > 0.7) { // Similarity threshold
-                    return keys[maxIndex];
+                if (similarities[maxIndex] > 0.85) {
+                    bestMatch = { key: keys[maxIndex], score: similarities[maxIndex] };
+                }
+
+                // Debug logging
+                if (debugMode) {
+                    const debugLog = document.getElementById('debugLog');
+                    const debugItem = document.createElement('div');
+                    debugItem.classList.add('debug-item');
+                    debugItem.innerHTML = `<p><strong>Query:</strong> ${query}</p><p><strong>AI Match:</strong> ${keys[maxIndex]} (Score: ${similarities[maxIndex].toFixed(3)})</p>`;
+                    debugLog.appendChild(debugItem);
+                    debugLog.scrollTop = debugLog.scrollHeight;
                 }
             }
 
-            // Fallback to synonyms
-            const queryWords = query.toLowerCase().split(' ');
+            // Synonym matching
+            const queryWords = normalizedQuery.split(' ');
             for (const [key, synList] of Object.entries(synonyms)) {
-                if (queryWords.some(word => synList.includes(word) || word === key)) {
-                    return key;
+                for (const { word, weight } of synList) {
+                    if (queryWords.some(q => normalizeText(q).includes(normalizeText(word)))) {
+                        const score = weight * 0.9; // Scale synonym score
+                        if (score > bestMatch.score) {
+                            bestMatch = { key, score };
+                        }
+                    }
                 }
             }
 
-            // Fallback to Levenshtein distance
+            // Levenshtein fallback
             let minDistance = Infinity;
             let closestKey = null;
             for (const key of Object.keys(knowledgeBase)) {
-                const keyWords = key.split(' ');
-                const sharedWords = queryWords.filter(word => keyWords.includes(word)).length;
-                const distance = levenshteinDistance(query, key);
-                const score = distance - sharedWords * 3;
-                if (score < minDistance) {
-                    minDistance = score;
+                const distance = levenshteinDistance(normalizedQuery, normalizeText(key));
+                const score = (1 - distance / Math.max(normalizedQuery.length, key.length)) * 0.8; // Scale Levenshtein score
+                if (score > bestMatch.score && distance < 5) {
+                    bestMatch = { key, score };
+                }
+                if (distance < minDistance) {
+                    minDistance = distance;
                     closestKey = key;
                 }
             }
-            return minDistance < 8 ? closestKey : null;
+
+            return bestMatch.key || (minDistance < 5 ? closestKey : null);
         }
 
         function getQueryPriority(query) {
-            const urgentKeywords = ['cumplimiento', 'cnv', 'regulacion', 'reasignar', 'apertura', 'transferencia'];
-            return urgentKeywords.some(k => query.includes(k)) ? 2 : 1;
+            const urgentKeywords = ['reasignación', 'transferencia', 'apertura', 'cumplimiento', 'echeq', 'cable'];
+            return urgentKeywords.some(k => normalizeText(query).includes(k)) ? 2 : 1;
         }
 
         function clusterQuery(query) {
+            const normalizedQuery = normalizeText(query);
             for (const [cluster, queries] of Object.entries(queryClusters)) {
                 for (const q of queries) {
-                    if (levenshteinDistance(query, q) < 8 || query.split(' ').some(word => q.includes(word))) {
+                    if (levenshteinDistance(normalizedQuery, normalizeText(q)) < 5 || normalizedQuery.split(' ').some(word => normalizeText(q).includes(word))) {
                         queryClusters[cluster].push(query);
                         saveData();
                         return cluster;
@@ -426,11 +506,9 @@
             suggestionList.innerHTML = '';
             const suggestions = [];
             for (const [query, count] of Object.entries(queryFrequency)) {
-                if (count >= 3 && !knowledgeBase[query]) {
+                if (count >= 3 && !knowledgeBase[normalizeText(query)]) {
                     const similarKey = findSimilarKeyword(query);
-                    const suggestedResponse = similarKey
-                        ? `Basado en "${similarKey}": ${knowledgeBase[similarKey]}`
-                        : DEFAULT_RESPONSE;
+                    const suggestedResponse = similarKey ? `Basado en "${similarKey}": ${knowledgeBase[similarKey]}` : DEFAULT_RESPONSE;
                     const priority = getQueryPriority(query) * count;
                     suggestions.push({ query, count, suggestedResponse, priority });
                 }
@@ -451,22 +529,19 @@
         async function sendMessage() {
             const userInput = document.getElementById('userInput');
             const chatContainer = document.getElementById('chatContainer');
-            const messageText = userInput.value.trim().toLowerCase();
+            const messageText = userInput.value.trim();
 
             if (messageText === '') return;
 
-            // Add user message
             const userMessage = document.createElement('div');
             userMessage.classList.add('message', 'user');
             userMessage.textContent = messageText;
             chatContainer.appendChild(userMessage);
 
-            // Log query
             queryLogs.push({ timestamp: new Date().toISOString(), query: messageText, cluster: clusterQuery(messageText) });
             queryFrequency[messageText] = (queryFrequency[messageText] || 0) + 1;
             saveData();
 
-            // Check knowledge base with AI
             let botResponse = DEFAULT_RESPONSE;
             const matchedKey = await findSimilarKeyword(messageText);
 
@@ -474,12 +549,10 @@
                 botResponse = knowledgeBase[matchedKey];
             }
 
-            // Update suggestions if no match
             if (!matchedKey) {
                 renderSuggestions();
             }
 
-            // Add bot response
             setTimeout(() => {
                 const botMessage = document.createElement('div');
                 botMessage.classList.add('message', 'bot');
@@ -506,15 +579,13 @@
             URL.revokeObjectURL(url);
         }
 
-        // Handle Enter key
         document.getElementById('userInput').addEventListener('keypress', (e) => {
             if (e.key === 'Enter') sendMessage();
         });
 
-        // Initial setup
         renderKnowledgeBase();
         renderSuggestions();
-        loadModel(); // Load AI model on page load
+        loadModel();
     </script>
 </body>
 </html>
